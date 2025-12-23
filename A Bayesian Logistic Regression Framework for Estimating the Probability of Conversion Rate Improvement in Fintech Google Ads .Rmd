@@ -1,0 +1,418 @@
+---
+title: "A Bayesian Logistic Regression Framework for Estimating the Probability of Conversion Rate Improvement in Fintech Google Ads Campaigns"
+author: 
+ - "Adhika Gunawan - 2802438205"
+ - "Cristopher Aurelio Andreas - 2802437436"
+ - "Reyhan Fawwaz Habibie - 2802434573"
+ - "Yonggara Halim Senata - 2802428394"
+ - "Andrew Steven Castilani - 2802437291"       
+date: "`r Sys.Date()`"
+output:
+  word_document: 
+    toc: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.align = "center", fig.width = 10, fig.height = 8)
+```
+
+# a. Abstract
+
+This study investigates the drivers of Conversion Rate (CR) in a Fintech Google Ads campaign using a Bayesian probabilistic framework. We modeled daily ad metrics (Cost, Impressions, CPC) via Bayesian Logistic Regression and estimated parameters using Markov Chain Monte Carlo (MCMC) sampling. Results indicate a 0% probability that increasing the marketing budget improves CR, an 85% probability that higher Impressions increase CR, and a 100% probability that higher CPC correlates with higher efficiency. These findings suggest diminishing returns on budget while highlighting the importance of targeted bidding and impression strategies. We recommend shifting the campaign focus from maximizing reach to optimizing targeting relevance.
+
+Keywords: Bayesian Regression, Google Ads, Conversion Rate, MCMC, efficiency.
+
+# b. Introduction
+
+## i. Background and Motivation
+
+In the competitive landscape of Fintech digital marketing, optimizing the **Conversion Rate (CR)** is crucial for maintaining a healthy Return on Investment (ROI). Marketers often face the dilemma of "Scaling vs. Efficiency"whether to increase budget to get more volume or restrict budget to maintain efficiency.
+
+Traditional frequentist methods (like standard Logistic Regression) typically provide point estimates (e.g., "Cost has a negative effect") but fail to intuitively quantify the *uncertainty* of these effects. This study adopts a **Bayesian framework** to provide probabilistic insights (e.g., "There is a 99% probability that Cost decreases CR"), which is more actionable for decision-making under uncertainty.
+
+# c. Literature Review
+
+## i. Overview of Existing Studies
+
+Digital advertising performance is typically analyzed using Maximum Likelihood Estimation (MLE). While effective for large datasets, MLE can be prone to overfitting and struggles to incorporate prior domain knowledge.
+
+## ii. Why Bayesian Analysis Fits In
+
+Bayesian methods have gained traction in marketing analytics for their ability to incorporate prior beliefs (domain knowledge) and handle small sample sizes robustly. Unlike frequentist approaches that treat parameters as fixed constants, Bayesian analysis treats them as random variables described by a probability distribution.
+
+## iii. Justification for Bayesian Approach
+
+We adopt the Bayesian approach for this case study because:
+
+1.  **Probabilistic Interpretation:** It allows us to directly answer business questions such as "What is the probability that this strategy works?"
+
+2.  **Regularization via Priors:** By using weakly informative priors, we prevent the model from making unrealistic estimates (e.g., infinite odds ratios) in cases of perfect separation.
+
+# d. Methodology
+
+## i. Dataset Description
+
+The dataset consists of daily performance metrics from a Fintech Google Ads campaign throughout 2024.
+
+```{r}
+# Load necessary libraries
+library(tidyverse)
+library(brms)
+library(tidybayes)
+library(ggplot2)
+library(ggdist)
+library(patchwork)
+library(loo) 
+library(dplyr)
+library(posterior)
+
+# Set seed for reproducibility
+set.seed(2024)
+
+# Load Data
+
+data_ads <- read.csv("dummy_google_ads_2024.csv")
+
+# Preprocessing & Scaling
+df_paper <- data_ads %>%
+  mutate(
+    # Standardize Predictors (Z-score) is crucial for Bayesian Model efficiency
+    cost_scaled = as.numeric(scale(total_cost)), 
+    imp_scaled  = as.numeric(scale(impression)), 
+    cpc_scaled  = as.numeric(scale(cpc)),
+    
+    # Ensure Integers for Binomial Model
+    click      = as.integer(click),
+    conversion = as.integer(conversion)
+  )
+
+knitr::kable(head(df_paper, 5), caption = "Table 1: Preview of Preprocessed Data")
+```
+
+## ii. Model Spesification
+
+We model the Conversion Rate using a Bayesian Logistic Regression (Binomial family).
+
+Let $y_i$ be the number of conversions and $n_i$ be the number of clicks on day $i$.
+
+Likelihood: $$ y_i \sim \text{Binomial}(n_i, p_i) $$$$ \text{logit}(p_i) = \alpha + \beta_1 \text{Cost}_i + \beta_2 \text{Imp}_i + \beta_3 \text{CPC}_i $$
+
+## iii. Prior, Likelihood, Posterior
+
+According to Bayes' Theorem, the posterior distribution $P(\theta \mid D)$ is proportional to the likelihood multiplied by the prior:
+
+$$
+P(\alpha, \beta \mid y) \propto 
+\underbrace{P(y \mid \alpha, \beta)}_{\text{Likelihood}} 
+\times 
+\underbrace{P(\alpha, \beta)}_{\text{Prior}}
+$$
+
+We use weakly informative priors to ensure objective estimation:
+
+$$
+\alpha \sim \mathcal{N}(0, 5)
+$$
+
+$$
+\beta_j \sim \mathcal{N}(0, 5), \quad j = 1, 2, 3
+$$
+
+We estimated the model using MCMC sampling with 4 chains and 4,000 iterations via the `brms` package (Stan interface).
+
+## iv. Model Inference
+
+```{r}
+# Run Bayesian Model
+# save_pars = save_pars(all = TRUE) is required for WAIC/LOO calculation
+model_final <- brm(
+  formula = conversion | trials(click) ~ cost_scaled + imp_scaled + cpc_scaled,
+  data = df_paper,
+  family = binomial(link = "logit"),
+  prior = c(
+    prior(normal(0, 5), class = "b"),
+    prior(normal(0, 5), class = "Intercept")
+  ),
+  chains = 4, iter = 4000, warmup = 1000, cores = 4, seed = 123,
+  save_pars = save_pars(all = TRUE), 
+  file = "model_bayes_final_assignment" # Caching the model
+)
+```
+
+# e. Results and Discussion
+
+## i. Model Estimation Results
+
+The summary of the posterior distribution is presented below. The convergence diagnostic ($\hat{R}$) is 1.00 for all parameters, indicating stable convergence.
+
+ 
+
+```{r}
+summary(model_final)
+```
+
+## ii. Posterior Distribution and Probabilistic Findings
+
+Posterior distribution plot :
+
+```{r}
+
+
+post_samples <- as_draws_df(model_final)
+# Turn posterior samples into long format
+post_long <- post_samples %>%
+  select(b_cost_scaled, b_imp_scaled, b_cpc_scaled) %>%
+  pivot_longer(cols = everything(),
+               names_to = "variable",
+               values_to = "value") %>%
+  mutate(variable = recode(variable,
+                           b_cost_scaled = "Cost",
+                           b_imp_scaled  = "Impressions",
+                           b_cpc_scaled  = "CPC"))
+
+# Calculate probability of positive effect for labeling
+prob_pos <- post_long %>%
+  group_by(variable) %>%
+  summarise(prob_pos = mean(value > 0)) %>%
+  mutate(label = paste0("P(eff) = ", round(prob_pos * 100, 2), "%"))
+
+# Posterior distribution plot
+ggplot(post_long, aes(x = value, fill = variable)) +
+  geom_density(alpha = 0.5) +
+  facet_wrap(~variable, scales = "free") +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_text(data = prob_pos, 
+            aes(x = min(post_long$value), y = 0, label = label), 
+            inherit.aes = FALSE, hjust = 0, vjust = 1.5, size = 4) +
+  labs(title = "Posterior Distributions of Coefficients",
+       x = "Coefficient Value",
+       y = "Density") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+```
+
+```{r}
+# Turn off scientific notation
+options(scipen = 999)
+
+# Extract posterior samples
+post_samples <- as_draws_df(model_final)
+
+# 1. Calculate Probability of NEGATIVE Effect (Inefficiency)
+prob_cost_ineff <- mean(post_samples$b_cost_scaled > 0)
+prob_imp_ineff  <- mean(post_samples$b_imp_scaled > 0)
+prob_cpc_ineff  <- mean(post_samples$b_cpc_scaled > 0)
+
+# 2. Calculate 95% Credible Intervals (CI)
+ci_cost <- quantile(post_samples$b_cost_scaled, probs = c(0.025, 0.975))
+ci_imp  <- quantile(post_samples$b_imp_scaled,  probs = c(0.025, 0.975))
+ci_cpc  <- quantile(post_samples$b_cpc_scaled,  probs = c(0.025, 0.975))
+
+print(ci_cost)
+print(ci_imp)
+print(ci_cpc)
+```
+
+The analysis reveals compelling evidence of diminishing returns:
+
+-   Effect of Cost: The 95% Credible Interval is entirely negative ([−0.126,−0.096]), indicating strong evidence that increasing the marketing budget is associated with a decrease in conversion rate.
+
+-   Effect of Impression: The 95% Credible Interval crosses zero ([−0.008,0.027]), meaning the effect is statistically inconclusive; we cannot confidently say that chasing higher Impressions leads to a higher conversion rate.
+
+-   Effect of CPC: The 95% Credible Interval is entirely positive ([0.031,0.061]), providing strong evidence that higher CPC correlates with higher efficiency.
+
+## iii. Model Evaluation
+
+To ensure model validity, we performed comprehensive diagnostics.
+
+### A.**Trace Plots (Convergence Check)**
+
+The "fuzzy caterpillar" shape in the trace plots below indicates good mixing of the MCMC chains.
+
+```{r}
+plot(model_final, combo = c("trace", "dens"), variable = c("b_cost_scaled", "b_imp_scaled", "b_cpc_scaled"))
+
+```
+
+### B. Fit Statistics (WAIC and LOO)
+
+We computed the Widely Applicable Information Criterion (WAIC) and Leave-One-Out Cross-Validation (LOO) to assess predictive accuracy.
+
+```{r}
+fit_waic <- waic(model_final)
+fit_loo  <- loo(model_final)
+
+print(fit_waic)
+print(fit_loo)
+```
+
+### C. Deviance Information Criterion (DIC)
+
+```{r}
+
+
+ll <- log_lik(model_final) 
+
+
+deviance_samples <- -2 * rowSums(ll)
+
+
+d_bar <- mean(deviance_samples)      #
+p_d   <- var(deviance_samples) / 2   
+dic   <- d_bar + p_d                 
+
+cat(sprintf("\n--- DIC (Deviance Information Criterion) ---\n"))
+cat(sprintf("DIC  : %.2f\n", dic))
+cat(sprintf("p_D  : %.2f (Effective Parameters)\n", p_d))
+```
+
+### D. Visualization
+
+```{r}
+# --- THEME COLORS ---
+theme_color <- "#2E86C1" # Professional Blue
+
+# --- A. POSTERIOR COEFFICIENTS ---
+plot_coeff <- model_final %>%
+  gather_draws(b_cost_scaled, b_imp_scaled, b_cpc_scaled) %>%
+  ggplot(aes(y = .variable, x = .value)) +
+  stat_halfeye(
+    .width = c(0.80, 0.95), 
+    fill = theme_color, 
+    alpha = 0.7,
+    point_interval = median_hdi
+  ) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray30") +
+  scale_y_discrete(labels = c("b_cost_scaled"="Cost", "b_imp_scaled"="Impression", "b_cpc_scaled"="CPC")) +
+  labs(title = "A. Posterior Coefficients", x = "Effect Size (Log-Odds)", y = NULL) +
+  theme_minimal() +
+  theme(panel.grid.major.y = element_blank(), plot.title = element_text(face = "bold"))
+
+# --- B. MODEL FIT (PPC) ---
+plot_ppc <- pp_check(model_final, ndraws = 50) +
+  labs(title = "B. Model Fit Check (PPC)", x = "Number of Conversions") +
+  theme_classic() + 
+  theme(legend.position = "none", plot.title = element_text(face = "bold"))
+
+# --- C. EFFECT OF IMPRESSION ---
+ce_imp <- conditional_effects(model_final, effects = "imp_scaled")
+dat_imp <- ce_imp$imp_scaled
+plot_imp <- ggplot(dat_imp, aes(x = imp_scaled, y = estimate__)) +
+  geom_ribbon(aes(ymin = lower__, ymax = upper__), fill = theme_color, alpha = 0.2) +
+  geom_line(color = theme_color, size = 1.2) +
+  labs(title = "C. Effect of Impression", x = "Impression (Std)", y = "Predicted CR") +
+  theme_minimal() + theme(plot.title = element_text(face = "bold"))
+
+# --- D. EFFECT OF COST ---
+ce_cost <- conditional_effects(model_final, effects = "cost_scaled")
+dat_cost <- ce_cost$cost_scaled
+plot_cost <- ggplot(dat_cost, aes(x = cost_scaled, y = estimate__)) +
+  geom_ribbon(aes(ymin = lower__, ymax = upper__), fill = "#E74C3C", alpha = 0.2) + # Red for Warning
+  geom_line(color = "#C0392B", size = 1.2) +
+  labs(title = "D. Effect of Cost", x = "Cost (Std)", y = "Predicted CR") +
+  theme_minimal() + theme(plot.title = element_text(face = "bold"))
+# --- D. EFFECT OF CPC ---
+ce_cpc <- conditional_effects(model_final, effects = "cpc_scaled")
+dat_cpc <- ce_cpc$cpc_scaled
+plot_cpc <- ggplot(dat_cpc, aes(x = cpc_scaled, y = estimate__)) +
+  geom_ribbon(aes(ymin = lower__, ymax = upper__), fill = "blue", alpha = 0.2) + # Red for Warning
+  geom_line(color = "darkblue", size = 1.2) +
+  labs(title = "D. Effect of CPC", x = "CPC (Std)", y = "Predicted CR") +
+  theme_minimal() + theme(plot.title = element_text(face = "bold"))
+# --- COMBINE PLOTS ---
+final_plot <- (plot_coeff + plot_ppc) / (plot_imp + plot_cost) + plot_cpc +
+  plot_annotation(
+    title = "Bayesian Analysis Results",
+    theme = theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+  )
+
+print(final_plot)
+```
+
+## iv. Comparison with Classical Methods
+
+Unlike classical methods that rely on p-values to determine significance, the Bayesian approach provides a **direct probability** of the effect direction. For instance, classical output might show a coefficient of -0.08 with $p < 0.05$. In contrast, our Bayesian result states there is a **100% probability** that the effect is negative, offering a more intuitive risk assessment for stakeholders.
+
+# f. Conclusion and Future Work
+
+## i. Summary of Findings
+
+The Bayesian analysis of the Fintech Google Ads campaign reveals that increasing the marketing budget has a 0% probability of improving conversion rate, indicating market saturation, while higher impressions have an 85% probability of boosting conversion, and higher CPC shows a 100% probability of enhancing efficiency. These results suggest diminishing returns on budget and highlight the importance of targeted bidding and impression strategies. We recommend adopting an "Efficiency-First" approach, focusing on relevance and optimization rather than maximizing reach.
+
+## ii. Limitations
+
+-   **Aggregation Bias:** Daily aggregated data may mask user-level heterogeneity (Simpson's Paradox).
+
+-   **Independence Assumption:** The binomial model assumes independent clicks, which may not hold for repeat visitors.
+-   **Datasets : ** Furthermore, access to proprietary fintech marketing data is restricted due to confidentiality agreements and privacy concerns. Consequently, this study utilizes a synthetic dataset generated to simulate realistic campaign performance metrics. 
+
+## iii. Recomendations for Future Research
+
+-   **Hierarchical Modeling:** Implement a multilevel model to account for different Ad Groups or Campaigns.
+
+-   **Granular Data:** Integrate user-level data (e.g., Device, Time of Day) for precise targeting.
+
+# g. References
+
+-   Gelman, A., Carlin, J. B., Stern, H. S., Dunson, D., Vehtari, A., & Rubin,
+    D. B. (2013). Bayesian data analysis (3rd ed.). Chapman & Hall/CRC.
+
+-   McElreath, R. (2020). Statistical rethinking: A Bayesian course with
+    examples in R and Stan (2nd ed.). CRC Press.
+
+-   Kruschke, J. K. (2015). Doing Bayesian data analysis: A tutorial with R,
+    JAGS, and Stan (2nd ed.). Academic Press.
+
+-   Lee, P. M. (2012). Bayesian statistics: An introduction (4th ed.). Wiley.
+
+-   Bürkner, P.-C. (2017). brms: An R package for Bayesian multilevel
+    models using Stan. Journal of Statistical Software, 80(1), 1–28.
+    https://doi.org/10.18637/jss.v080.i01
+
+-    Bürkner, P.-C. (2018). Advanced Bayesian multilevel modeling with the
+    R package brms. The R Journal, 10(1), 395–411.
+    https://doi.org/10.32614/RJ-2018-017
+
+-   Stan Development Team. (2024). Stan modeling language user’s guide.
+    https://mc-stan.org
+
+-   Yuan, Y., Dong, X., Dong, C., Sun, Y., Yan, Z., & Pani, A. (2018).
+    Dynamic hierarchical empirical Bayes: A predictive model applied to
+    online advertising. arXiv preprint arXiv:1809.02213.
+    https://arxiv.org/abs/1809.02213
+
+-   Chan, D., & Perry, M. (2017). Challenges and opportunities in online
+    advertising attribution modeling. International Journal of Research in
+    Marketing, 34(1), 70–78. https://doi.org/10.1016/j.ijresmar.2016.07.001
+
+-   Dalessandro, B., Perlich, C., Stitelman, O., & Provost, F. (2014).
+    Causally motivated attribution for online advertising. Proceedings of the
+    AAAI Conference on Artificial Intelligence, 28(1), 57–65.
+
+-   Zhang, W., Yuan, S., & Wang, J. (2014). Real-time bidding
+    benchmarking with iPinYou dataset. ACM Transactions on Intelligent
+    Systems and Technology, 7(2), 1–29. https://doi.org/10.1145/2743025
+
+-   Gelman, A., Hwang, J., & Vehtari, A. (2014). Understanding predictive
+    information criteria for Bayesian models. Statistics and Computing, 24,
+    997–1016. https://doi.org/10.1007/s11222-013-9416-2
+
+-   Vehtari, A., Gelman, A., & Gabry, J. (2017). Practical Bayesian model
+    evaluation using leave-one-out cross-validation and WAIC. Statistics and
+    Computing, 27, 1413–1432. https://doi.org/10.1007/s11222-016-9696-4
+
+-    Pearl, J. (2009). Causality: Models, reasoning, and inference (2nd ed.).
+    Cambridge University Press.
+
+-   Ghose, A., & Todri-Adamopoulos, V. (2016). Toward a digital attribution
+    model: Measuring the impact of display advertising on online consumer
+    behavior. MIS Quarterly, 40(4), 889–910.
+
+-   Li, H., & Kannan, P. K. (2014). Attributing conversions in a multichannel
+    online marketing environment: An empirical model and its application to
+    field experiments. Journal of Marketing Research, 51(1), 40–56.
+    https://doi.org/10.1509/jmr.13.0050
